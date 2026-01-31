@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/element/element.dart';
+import 'package:brick_build/src/utils/shared_checker.dart';
 import 'package:brick_json_generators/json_serialize.dart';
 import 'package:brick_supabase/brick_supabase.dart';
 import 'package:brick_supabase_generators/src/supabase_fields.dart';
@@ -23,18 +24,36 @@ class SupabaseSerialize extends SupabaseSerdesGenerator
     for (final field in unignoredFields) {
       final annotation = fields.annotationForField(field);
       final checker = checkerForType(field.type);
-      final columnName = providerNameForField(annotation.name, checker: checker);
-      final isAssociation = checker.isSibling || (checker.isIterable && checker.isArgTypeASibling);
+      final columnName =
+          providerNameForField(annotation.name, checker: checker);
+      final isAssociation = checker.isSibling ||
+          (checker.isIterable && checker.isArgTypeASibling);
 
       var definition = '''
         '${field.name}': const RuntimeSupabaseColumnDefinition(
           association: $isAssociation,
           columnName: '$columnName',
       ''';
-      if (isAssociation) definition += 'associationType: ${checker.withoutNullResultType},';
-      if (isAssociation) definition += 'associationIsNullable: ${checker.isNullable},';
-      if (annotation.foreignKey != null) definition += "foreignKey: '${annotation.foreignKey}',";
-      if (annotation.query != null) definition += "query: '''${annotation.query}''',";
+      if (isAssociation) {
+        if (checker.isSibling) {
+          definition +=
+              'associationType: ${SharedChecker.withoutNullability(checker.targetType)},';
+        } else if (checker.isIterable && checker.isArgTypeASibling) {
+          definition +=
+              'associationType: ${SharedChecker.withoutNullability(checker.argType)},';
+        } else {
+          definition += 'associationType: ${checker.withoutNullResultType},';
+        }
+      }
+      if (isAssociation) {
+        definition += 'associationIsNullable: ${checker.isNullable},';
+      }
+      if (annotation.foreignKey != null) {
+        definition += "foreignKey: '${annotation.foreignKey}',";
+      }
+      if (annotation.query != null) {
+        definition += "query: '''${annotation.query}''',";
+      }
       definition += ')';
       fieldsToColumns.add(definition);
 
@@ -46,7 +65,8 @@ class SupabaseSerialize extends SupabaseSerdesGenerator
         '@override\nfinal defaultToNull = ${config?.defaultToNull};',
       '@override\nfinal fieldsToSupabaseColumns = {${fieldsToColumns.join(',\n')}};',
       '@override\nfinal ignoreDuplicates = ${config?.ignoreDuplicates};',
-      if (config?.onConflict != null) "@override\nfinal onConflict = '${config?.onConflict}';",
+      if (config?.onConflict != null)
+        "@override\nfinal onConflict = '${config?.onConflict}';",
       '@override\nfinal uniqueFields = {${uniqueFields.map((u) => "'$u'").join(',\n')}};',
     ];
   }
