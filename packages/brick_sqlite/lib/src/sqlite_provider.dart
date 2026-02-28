@@ -111,7 +111,10 @@ class SqliteProvider<TProviderModel extends SqliteModel>
         ? countQuery.length
         : sqlite_utils.firstIntValue(countQuery);
 
-    return (count ?? 0) > 0;
+    if ((count ?? 0) > 0) {
+      return true;
+    }
+    return false;
   }
 
   /// Fetch one time from the SQLite database
@@ -155,18 +158,24 @@ class SqliteProvider<TProviderModel extends SqliteModel>
 
   /// The latest migration version committed to SQLite
   Future<int> lastMigrationVersion() async {
+    _logger.info('lastMigrationVersion() started');
     final db = await getDb();
+    _logger.info('db instance acquired');
 
     // ensure migrations table exists
     await db.execute(
       'CREATE TABLE IF NOT EXISTS $_migrationVersionsTableName(version INTEGER PRIMARY KEY)',
     );
+    _logger.info('MigrationVersions table ensured');
 
     final sqliteVersions = await db.query(
       _migrationVersionsTableName,
       distinct: true,
       orderBy: 'version DESC',
       limit: 1,
+    );
+    _logger.info(
+      'MigrationVersions query completed. Versions found: ${sqliteVersions.length}',
     );
 
     if (sqliteVersions.isEmpty) {
@@ -176,9 +185,15 @@ class SqliteProvider<TProviderModel extends SqliteModel>
     return sqliteVersions.first['version']! as int;
   }
 
-  Future<bool> _shouldSkipCommand(Database db, MigrationCommand command) async {
-    // Import InsertColumn if not already imported
-    if (command is! InsertColumn) return false;
+  Future<bool> _shouldSkipCommand(
+    Database db,
+    MigrationCommand command, {
+    Map<String, Set<String>>? tableColumnsCache,
+    Set<String>? tablesCache,
+  }) async {
+    if (command is! InsertColumn) {
+      return false;
+    }
 
     final insertCommand = command;
     final tableName = insertCommand.onTable;
@@ -186,12 +201,31 @@ class SqliteProvider<TProviderModel extends SqliteModel>
 
     try {
       // Check if table exists first
-      final tableExists = await _tableExists(db, tableName);
-      if (!tableExists) return false;
+      final tableExists = await _tableExists(
+        db,
+        tableName,
+        cache: tablesCache,
+      );
+      if (!tableExists) {
+        return false;
+      }
+
+      // Check cache first
+      if (tableColumnsCache != null &&
+          tableColumnsCache.containsKey(tableName)) {
+        return tableColumnsCache[tableName]!.contains(columnName);
+      }
 
       // Check if column exists in the table
       final columns = await db.rawQuery('PRAGMA table_info("$tableName")');
-      return columns.any((col) => col['name'] == columnName);
+      final columnNames = columns.map((col) => col['name'] as String).toSet();
+
+      // Update cache if provided
+      if (tableColumnsCache != null) {
+        tableColumnsCache[tableName] = columnNames;
+      }
+
+      return columnNames.contains(columnName);
     } catch (e) {
       _logger.warning('Error checking if column exists: $e');
       return false;
@@ -199,13 +233,26 @@ class SqliteProvider<TProviderModel extends SqliteModel>
   }
 
   /// Check if a table exists in the database
-  Future<bool> _tableExists(Database db, String tableName) async {
+  Future<bool> _tableExists(
+    Database db,
+    String tableName, {
+    Set<String>? cache,
+  }) async {
+    if (cache != null && cache.contains(tableName)) {
+      return true;
+    }
+
     try {
       final result = await db.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         [tableName],
       );
-      return result.isNotEmpty;
+
+      final exists = result.isNotEmpty;
+      if (exists && cache != null) {
+        cache.add(tableName);
+      }
+      return exists;
     } catch (e) {
       _logger.warning('Error checking if table exists: $e');
       return false;
@@ -217,10 +264,13 @@ class SqliteProvider<TProviderModel extends SqliteModel>
   ///
   /// If [down] is `true`, the migrations will be run in reverse order.
   Future<void> migrate(List<Migration> migrations, {bool down = false}) async {
+    _logger.info('migrate() started');
     final db = await getDb();
+    _logger.info('db instance acquired for migrate');
 
     // Ensure foreign keys are enabled
     await db.execute('PRAGMA foreign_keys = ON');
+    _logger.info('Foreign keys enabled');
 
     final latestMigrationVersion =
         MigrationManager.latestMigrationVersion(migrations);
@@ -231,37 +281,54 @@ class SqliteProvider<TProviderModel extends SqliteModel>
       _logger.info(
         'Already at latest migration version ($latestMigrationVersion)',
       );
+      _logger.info('Already at latest migration version');
       return;
     }
 
     final migrationsToRun = down ? migrations.reversed.toList() : migrations;
+
+    // Cache to avoid thousands of PRAGMA table_info queries
+    final tableColumnsCache = <String, Set<String>>{};
+    final tablesCache = <String>{};
+
     for (final migration in migrationsToRun) {
       final commands = down ? migration.down : migration.up;
-      for (final command in commands) {
-        _logger.finer(
-          'Running migration (${migration.version}): ${command.statement ?? command.forGenerator}',
-        );
+      await _lock.synchronized(() async {
+        for (final command in commands) {
+          _logger.finer(
+            'Running migration (${migration.version}): ${command.statement ?? command.forGenerator}',
+          );
 
-        final alterCommand = AlterColumnHelper(command);
-        await _lock.synchronized(() async {
+          final alterCommand = AlterColumnHelper(command);
           if (alterCommand.requiresSchema) {
             // Check if this is an InsertColumn command with a column that already exists
             if (command is InsertColumn) {
-              final shouldSkip = await _shouldSkipCommand(db, command);
+              final shouldSkip = await _shouldSkipCommand(
+                db,
+                command,
+                tableColumnsCache: tableColumnsCache,
+                tablesCache: tablesCache,
+              );
               if (shouldSkip) {
-                _logger.info(
+                _logger.finer(
                   'Skipping schema command - column already exists: ${command.forGenerator}',
                 );
-                return;
+                continue;
               }
             }
 
             try {
               await alterCommand.execute(db);
+              // Clear cache for this table as schema changed
+              if (command is InsertColumn) {
+                tableColumnsCache.remove(command.onTable);
+              } else if (command is InsertTable) {
+                tablesCache.add(command.name);
+              }
             } catch (e) {
               // If it's a duplicate column error, log and continue
               if (e.toString().contains('duplicate column name')) {
-                _logger.warning(
+                _logger.finer(
                   'Column already exists in schema operation, skipping: ${command.forGenerator}',
                 );
               } else {
@@ -270,19 +337,30 @@ class SqliteProvider<TProviderModel extends SqliteModel>
             }
           } else if (command.statement != null) {
             // Check if this is an InsertColumn command and if the column already exists
-            if (await _shouldSkipCommand(db, command)) {
-              _logger.info(
+            if (await _shouldSkipCommand(
+              db,
+              command,
+              tableColumnsCache: tableColumnsCache,
+              tablesCache: tablesCache,
+            )) {
+              _logger.finer(
                 'Skipping command - column already exists: ${command.forGenerator}',
               );
-              return;
+              continue;
             }
 
             try {
               await db.execute(command.statement!);
+              // Update cache if it was an insert column or table
+              if (command is InsertColumn) {
+                tableColumnsCache.remove(command.onTable);
+              } else if (command is InsertTable) {
+                tablesCache.add(command.name);
+              }
             } catch (e) {
               // If it's a duplicate column error, log and continue
               if (e.toString().contains('duplicate column name')) {
-                _logger.warning(
+                _logger.finer(
                   'Column already exists, skipping: ${command.forGenerator}',
                 );
               } else {
@@ -290,8 +368,8 @@ class SqliteProvider<TProviderModel extends SqliteModel>
               }
             }
           }
-        });
-      }
+        }
+      });
 
       if (down) {
         await db.rawDelete(
