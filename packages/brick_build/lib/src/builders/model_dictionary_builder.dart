@@ -60,13 +60,30 @@ class ModelDictionaryBuilder<_ClassAnnotation> extends BaseBuilder<_ClassAnnotat
   static Map<String, String> classFilePathsFromAnnotations(
     Iterable<AnnotatedElement> annotations,
     Map<String, String> filesToContents,
-  ) =>
-      {
-        for (final annotation in annotations)
-          '${annotation.element.name}': filesToContents.entries
-              .firstWhere((entry) => entry.value.contains(RegExp(r'class\s+${annotation.element.name}\s*')))
-              .key
-              // Make relative from the `brick/` folder
-              .replaceAll(RegExp('^lib/'), '../'),
-      };
+  ) {
+    final result = <String, String>{};
+    for (final annotation in annotations) {
+      final className = annotation.element.name;
+      if (className == null) continue;
+      final entry = filesToContents.entries
+          .firstWhereOrNull((entry) => entry.value.contains(RegExp(r'\bclass\s+' + RegExp.escape(className) + r'\b')));
+      if (entry != null) {
+        result[className] = entry.key.replaceAll(RegExp('^lib/'), '../');
+      } else {
+        // Skip classes that are not found in any .model.dart file
+        // This can happen if the class is defined in a non-.model.dart file
+        brickLogger.warning('Class $className not found in any .model.dart file, skipping...');
+      }
+    }
+    return result;
+  }
+}
+
+extension<T> on Iterable<T> {
+  T? firstWhereOrNull(bool Function(T) test) {
+    for (final element in this) {
+      if (test(element)) return element;
+    }
+    return null;
+  }
 }
