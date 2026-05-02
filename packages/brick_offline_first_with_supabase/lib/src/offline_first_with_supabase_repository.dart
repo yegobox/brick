@@ -400,6 +400,8 @@ abstract class OfflineFirstWithSupabaseRepository<
     },
     http.Client? innerClient,
     Duration? processingInterval,
+    /// 409 (Conflict) is intentionally omitted so the offline queue deletes
+    /// the job after the server rejects the duplicate rather than retrying forever.
     List<int> reattemptForStatusCodes = const [
       400,
       401,
@@ -407,7 +409,6 @@ abstract class OfflineFirstWithSupabaseRepository<
       404,
       405,
       408,
-      409,
       429,
       500,
       502,
