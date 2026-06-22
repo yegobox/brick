@@ -8,6 +8,7 @@ import 'package:brick_sqlite/src/helpers/alter_column_helper.dart';
 import 'package:brick_sqlite/src/helpers/query_sql_transformer.dart';
 import 'package:brick_sqlite/src/models/sqlite_model.dart';
 import 'package:brick_sqlite/src/sqlite_model_dictionary.dart';
+import 'package:brick_sqlite/src/turso/turso_migration_helper.dart';
 import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 import 'package:sqflite_common/sqlite_api.dart';
@@ -268,6 +269,8 @@ class SqliteProvider<TProviderModel extends SqliteModel>
     final db = await getDb();
     _logger.info('db instance acquired for migrate');
 
+    await cleanupOrphanedMigrationTempTables(db);
+
     // Ensure foreign keys are enabled
     await db.execute('PRAGMA foreign_keys = ON');
     _logger.info('Foreign keys enabled');
@@ -383,6 +386,8 @@ class SqliteProvider<TProviderModel extends SqliteModel>
         );
       }
     }
+
+    await cleanupOrphanedMigrationTempTables(db);
   }
 
   /// Fetch results for model with a custom SQL statement.

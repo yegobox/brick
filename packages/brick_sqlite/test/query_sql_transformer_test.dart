@@ -78,7 +78,7 @@ void main() {
     });
 
     test('where non association field', () async {
-      const statement = 'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE full_name = ?';
+      const statement = 'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE `DemoModel`.full_name = ?';
       final sqliteQuery = QuerySqlTransformer<DemoModel>(
         modelDictionary: dictionary,
         query: Query.where('name', 'Thomas'),
@@ -101,7 +101,7 @@ void main() {
 
     test('compound clause', () async {
       const statement =
-          '''SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE (id = ? OR full_name = ?) AND (id = ? AND full_name = ?) OR (id = ? AND full_name = ?)''';
+          '''SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE (`DemoModel`.id = ? OR `DemoModel`.full_name = ?) AND (`DemoModel`.id = ? AND `DemoModel`.full_name = ?) OR (`DemoModel`.id = ? AND `DemoModel`.full_name = ?)''';
       final sqliteQuery = QuerySqlTransformer<DemoModel>(
         modelDictionary: dictionary,
         query: Query(
@@ -132,7 +132,7 @@ void main() {
 
     test('leading requirement with compound clauses', () async {
       const statement =
-          'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE id = ? AND (full_name = ? OR full_name = ?)';
+          'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE `DemoModel`.id = ? AND (`DemoModel`.full_name = ? OR `DemoModel`.full_name = ?)';
       final sqliteQuery = QuerySqlTransformer<DemoModel>(
         modelDictionary: dictionary,
         query: Query(
@@ -157,7 +157,7 @@ void main() {
     group('Compare', () {
       test('.doesNotContain', () async {
         const statement =
-            'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE full_name NOT LIKE ?';
+            'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE `DemoModel`.full_name NOT LIKE ?';
         final sqliteQuery = QuerySqlTransformer<DemoModel>(
           modelDictionary: dictionary,
           query: Query(
@@ -174,7 +174,7 @@ void main() {
 
       test('.inIterable', () async {
         const statement =
-            'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE full_name IN (?, ?)';
+            'SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE `DemoModel`.full_name IN (?, ?)';
         final sqliteQuery = QuerySqlTransformer<DemoModel>(
           modelDictionary: dictionary,
           query: Query(
@@ -205,7 +205,7 @@ void main() {
 
       test('simple', () async {
         const statement =
-            'SELECT COUNT(*) FROM `DemoModel` WHERE (id = ? OR full_name = ?) AND (id = ? AND full_name = ?) OR (id = ? AND full_name = ?)';
+            'SELECT COUNT(*) FROM `DemoModel` WHERE (`DemoModel`.id = ? OR `DemoModel`.full_name = ?) AND (`DemoModel`.id = ? AND `DemoModel`.full_name = ?) OR (`DemoModel`.id = ? AND `DemoModel`.full_name = ?)';
         final sqliteQuery = QuerySqlTransformer<DemoModel>(
           modelDictionary: dictionary,
           query: Query(
@@ -603,7 +603,7 @@ void main() {
     group('#values', () {
       test('boolean queries are converted', () {
         const statement =
-            '''SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE full_name = ? OR full_name = ?''';
+            '''SELECT DISTINCT `DemoModel`.* FROM `DemoModel` WHERE `DemoModel`.full_name = ? OR `DemoModel`.full_name = ?''';
         final sqliteQuery = QuerySqlTransformer<DemoModel>(
           modelDictionary: dictionary,
           query: Query(

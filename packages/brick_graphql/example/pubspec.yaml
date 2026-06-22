@@ -13,5 +13,10 @@ dependencies:
   gql_http_link:
 
 dependency_overrides:
+  xml: ^7.0.1
+  smithy:
+    path: ../../../../smithy
+  smithy_aws:
+    path: ../../../../smithy_aws
   brick_core:
     path: ../../brick_core

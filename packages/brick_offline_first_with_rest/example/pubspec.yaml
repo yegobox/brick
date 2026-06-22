@@ -6,6 +6,11 @@ environment:
   sdk: ">=3.4.0 <4.0.0"
 
 dependency_overrides:
+  xml: ^7.0.1
+  smithy:
+    path: ../../../../smithy
+  smithy_aws:
+    path: ../../../../smithy_aws
   brick_build:
     path: ../../brick_build
   brick_offline_first_with_rest:

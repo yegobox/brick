@@ -7,6 +7,7 @@ import 'package:brick_offline_first/brick_offline_first.dart';
 import 'package:brick_sqlite/brick_sqlite.dart';
 import 'package:brick_sqlite/db.dart';
 import 'package:brick_sqlite/memory_cache_provider.dart';
+import 'package:brick_sqlite/turso.dart';
 // ignore: implementation_imports
 import 'package:http/src/exception.dart';
 import 'package:logging/logging.dart';
@@ -131,8 +132,11 @@ abstract class OfflineFirstRepository<
     }
 
     try {
-      await remoteProvider.delete<TModel>(instance,
-          query: query, repository: this,);
+      await remoteProvider.delete<TModel>(
+        instance,
+        query: query,
+        repository: this,
+      );
       if (requireRemote) {
         rowsDeleted = await _deleteLocal<TModel>(instance, query: query);
         await notifySubscriptionsWithLocalData<TModel>();
@@ -218,9 +222,10 @@ abstract class OfflineFirstRepository<
             memoryCacheProvider.get<TModel>(query: query, repository: this);
 
         if (alwaysHydrate) {
-          // start round trip for fresh data
-          // ignore: unawaited_futures
-          hydrate<TModel>(query: query, deserializeSqlite: !seedOnly);
+          _scheduleRemoteRefresh<TModel>(
+            query: query,
+            deserializeSqlite: !seedOnly,
+          );
         }
 
         if (memoryCacheResults?.isNotEmpty ?? false) {
@@ -228,7 +233,17 @@ abstract class OfflineFirstRepository<
         }
       }
 
-      final modelExists = await exists<TModel>(query: query);
+      var modelExists = await exists<TModel>(query: query);
+
+      if (hydrateUnexisting && !modelExists) {
+        await _pullTursoIfAvailable();
+        modelExists = await exists<TModel>(query: query);
+        if (modelExists) {
+          return await sqliteProvider
+              .get<TModel>(query: query, repository: this)
+              .then((m) => memoryCacheProvider.hydrate<TModel>(m));
+        }
+      }
 
       if (requireRemote || (hydrateUnexisting && !modelExists)) {
         return await hydrate<TModel>(
@@ -236,9 +251,10 @@ abstract class OfflineFirstRepository<
           deserializeSqlite: !seedOnly,
         );
       } else if (alwaysHydrate) {
-        // start round trip for fresh data
-        // ignore: unawaited_futures
-        hydrate<TModel>(query: query, deserializeSqlite: !seedOnly);
+        _scheduleRemoteRefresh<TModel>(
+          query: query,
+          deserializeSqlite: !seedOnly,
+        );
       }
 
       return await sqliteProvider
@@ -325,8 +341,86 @@ abstract class OfflineFirstRepository<
   @override
   Future<void> initialize() async {
     logger.info('🚀 [OfflineFirstRepository] initialize() started');
+    await _pullTursoIfAvailable();
     await migrate();
+    await _pushTursoIfAvailable();
     logger.info('✅ [OfflineFirstRepository] initialize() completed');
+  }
+
+  /// Pull remote Turso changes and push local writes when using an embedded replica.
+  Future<void> sync() async {
+    await _pullTursoIfAvailable();
+    await _pushTursoIfAvailable();
+  }
+
+  /// Background Turso pull + remote hydrate for [OfflineFirstGetPolicy.alwaysHydrate].
+  void _scheduleRemoteRefresh<TModel extends TRepositoryModel>({
+    required Query? query,
+    required bool deserializeSqlite,
+  }) {
+    unawaited(
+      _refreshRemotesInBackground<TModel>(
+        query: query,
+        deserializeSqlite: deserializeSqlite,
+      ),
+    );
+  }
+
+  Future<void> _refreshRemotesInBackground<TModel extends TRepositoryModel>({
+    required Query? query,
+    required bool deserializeSqlite,
+  }) async {
+    await _pullTursoIfAvailable();
+    await hydrate<TModel>(
+      query: query,
+      deserializeSqlite: deserializeSqlite,
+    );
+  }
+
+  Future<void> _pullTursoIfAvailable() async {
+    try {
+      final sync = await _tursoSyncCapable();
+      if (sync == null) {
+        return;
+      }
+      logger.info('⬇️ [OfflineFirstRepository] pulling Turso replica');
+      await sync.pull();
+    } catch (e, stackTrace) {
+      logger.warning(
+        'Turso pull failed; continuing with local replica. '
+        'If this persists after recreating the Turso Cloud database, quit the app, '
+        'delete the local replica file (and -wal/-shm sidecars), and relaunch to '
+        're-bootstrap from cloud. Error: $e',
+        e,
+        stackTrace,
+      );
+    }
+  }
+
+  Future<void> _pushTursoIfAvailable() async {
+    try {
+      final sync = await _tursoSyncCapable();
+      if (sync == null) {
+        return;
+      }
+      // ignore: invalid_use_of_protected_member
+      final database = await sqliteProvider.getDb();
+      await cleanupOrphanedMigrationTempTables(database);
+      logger.info('⬆️ [OfflineFirstRepository] pushing Turso replica');
+      await sync.push();
+    } catch (e, stackTrace) {
+      logger.warning(
+        'Turso push failed; local writes are retained. Error: $e',
+        e,
+        stackTrace,
+      );
+    }
+  }
+
+  Future<TursoSyncCapable?> _tursoSyncCapable() async {
+    // ignore: invalid_use_of_protected_member
+    final database = await sqliteProvider.getDb();
+    return tursoSyncCapable(database);
   }
 
   /// Update SQLite structure with only new migrations.
