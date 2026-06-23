@@ -8,7 +8,7 @@ Full Turso setup: [turso.md](./turso.md). Policy reference: [../offline_first/po
 
 | Layer | What it is | How it updates |
 |-------|------------|----------------|
-| Local replica | `flipper_v45.sqlite` via Turso | App writes, `pull()` from Turso Cloud |
+| Local replica | `flipper.sqlite` via Turso | App writes, `pull()` from Turso Cloud |
 | Turso Cloud | `libsql://…turso.io` | `turso db shell`, other replicas, `push()` |
 | Supabase | `remoteProvider` | `hydrate()` on get, offline HTTP queue on upsert |
 
@@ -61,7 +61,7 @@ flowchart TD
 `push()` only uploads **incremental** changes after sync connects. To upload a full existing local file once:
 
 1. Quit the app (release file lock).
-2. `turso db create flipper --group default --from-file /path/to/flipper_v45.sqlite` (or `turso db import`).
+2. `turso db create flipper --group default --from-file /path/to/flipper.sqlite` (or `turso db import`).
 3. Update `tursoDatabaseUrl` / token in `secrets.dart` if the DB name changed.
 
 CLI database **name** may differ from hostname (e.g. name `flipper`, URL `flipper-richard457….turso.io`). Use `turso db list` / `turso db show flipper`.
@@ -93,8 +93,8 @@ The **local replica WAL** is out of sync with Turso Cloud (common after cloud re
 2. **Back up** then **delete** the local main DB and sidecars, e.g.:
 
 ```bash
-DB="$HOME/Library/Containers/rw.flipper/Data/Documents/flipper_v45.sqlite"
-cp "$DB" "$HOME/Desktop/flipper_v45.backup.sqlite"
+DB="$HOME/Library/Containers/rw.flipper/Data/Documents/flipper.sqlite"
+cp "$DB" "$HOME/Desktop/flipper.backup.sqlite"
 rm -f "$DB" "${DB}-wal" "${DB}-shm"
 ```
 
@@ -111,14 +111,4 @@ Brick auto-removes orphaned `-info` / `-changes` sidecars when the main DB file 
 
 ### Existing production devices (pre-Turso sqflite `flipper_v45.sqlite`)
 
-Upgrades should **keep** the existing local file:
-
-- `bootstrapIfEmpty` is **false** when the file exists and has data.
-- First connect opens the legacy SQLite as a Turso embedded replica (no `-info` sidecar yet).
-- `initialize()` **push** uploads local changes to Turso Cloud; **pull** merges cloud changes.
-
-Do **not** delete customer DB files on upgrade. Only delete sync sidecars when intentionally resetting sync after a broken partial delete.
-
-If Turso Cloud was seeded from another machine (`turso db create --from-file`), other devices may need a one-time local reset (backup → delete DB + `-info`/`-changes` sidecars → relaunch) to match cloud.
-
-Brick logs a warning and continues offline if pull/push fails at startup; fix credentials or reset the local file to restore sync.
+The main DB filename is now `flipper.sqlite` with no automatic migration from `flipper_v45.sqlite` — treat upgrades as a fresh local database (`bootstrapIfEmpty` from Turso Cloud or Supabase hydrate repopulates). The old `flipper_v45.sqlite` file is left on disk but unused.
