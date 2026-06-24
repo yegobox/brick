@@ -384,7 +384,15 @@ abstract class OfflineFirstRepository<
         return;
       }
       logger.info('⬇️ [OfflineFirstRepository] pulling Turso replica');
-      await sync.pull();
+      await sync.pull().timeout(
+        _tursoSyncOperationTimeout,
+        onTimeout: () {
+          throw TimeoutException(
+            'Turso pull timed out after ${_tursoSyncOperationTimeout.inSeconds}s',
+            _tursoSyncOperationTimeout,
+          );
+        },
+      );
     } catch (e, stackTrace) {
       logger.warning(
         'Turso pull failed; continuing with local replica. '
@@ -397,6 +405,8 @@ abstract class OfflineFirstRepository<
     }
   }
 
+  static const _tursoSyncOperationTimeout = Duration(seconds: 20);
+
   Future<void> _pushTursoIfAvailable() async {
     try {
       final sync = await _tursoSyncCapable();
@@ -407,7 +417,15 @@ abstract class OfflineFirstRepository<
       final database = await sqliteProvider.getDb();
       await cleanupOrphanedMigrationTempTables(database);
       logger.info('⬆️ [OfflineFirstRepository] pushing Turso replica');
-      await sync.push();
+      await sync.push().timeout(
+        _tursoSyncOperationTimeout,
+        onTimeout: () {
+          throw TimeoutException(
+            'Turso push timed out after ${_tursoSyncOperationTimeout.inSeconds}s',
+            _tursoSyncOperationTimeout,
+          );
+        },
+      );
     } catch (e, stackTrace) {
       logger.warning(
         'Turso push failed; local writes are retained. Error: $e',
