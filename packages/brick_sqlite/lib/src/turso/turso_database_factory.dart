@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -100,21 +101,16 @@ class TursoDatabaseFactory implements DatabaseFactory {
     });
   }
 
+  static const _syncConnectTimeout = Duration(seconds: 20);
+
   Future<turso.Database> _connectWithLockRetry(String resolvedPath) async {
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
-        return syncConfig == null
-            ? await turso.connect(LocalDbConfig(resolvedPath))
-            : await turso.connectSync(
-                SyncDbConfig(
-                  resolvedPath,
-                  remoteUrl: syncConfig!.remoteUrl,
-                  authToken: syncConfig!.authToken,
-                  bootstrapIfEmpty: syncConfig!.bootstrapIfEmpty,
-                  longPollTimeout: syncConfig!.longPollTimeout,
-                ),
-              );
+        if (syncConfig == null) {
+          return await turso.connect(LocalDbConfig(resolvedPath));
+        }
+        return await _connectSyncWithTimeout(resolvedPath);
       } catch (e) {
         lastError = e;
         final message = e.toString();
@@ -140,10 +136,51 @@ class TursoDatabaseFactory implements DatabaseFactory {
             'session on this file, then relaunch.',
           );
         }
+        if (syncConfig != null) {
+          return _connectLocalAfterSyncFailure(resolvedPath, e);
+        }
         rethrow;
       }
     }
+    if (syncConfig != null && lastError != null) {
+      return _connectLocalAfterSyncFailure(resolvedPath, lastError);
+    }
     throw lastError!;
+  }
+
+  Future<turso.Database> _connectSyncWithTimeout(String resolvedPath) {
+    return turso
+        .connectSync(
+          SyncDbConfig(
+            resolvedPath,
+            remoteUrl: syncConfig!.remoteUrl,
+            authToken: syncConfig!.authToken,
+            bootstrapIfEmpty: syncConfig!.bootstrapIfEmpty,
+            longPollTimeout: syncConfig!.longPollTimeout,
+          ),
+        )
+        .timeout(
+          _syncConnectTimeout,
+          onTimeout: () {
+            throw TimeoutException(
+              'Turso cloud sync connect timed out after '
+              '${_syncConnectTimeout.inSeconds}s',
+              _syncConnectTimeout,
+            );
+          },
+        );
+  }
+
+  Future<turso.Database> _connectLocalAfterSyncFailure(
+    String resolvedPath,
+    Object error,
+  ) async {
+    // ignore: avoid_print
+    print(
+      '⚠️ Turso cloud sync unavailable ($error); opening local replica only. '
+      'Data will repopulate from Supabase/Ditto when online.',
+    );
+    return turso.connect(LocalDbConfig(resolvedPath));
   }
 
   @override
