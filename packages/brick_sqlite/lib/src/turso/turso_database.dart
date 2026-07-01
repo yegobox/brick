@@ -51,20 +51,24 @@ class TursoSqfliteDatabase extends TursoConnectionExecutor
 
   @override
   Future<bool> pull() async {
-    _checkOpen();
-    if (!_isSync) {
-      return false;
-    }
-    return _tursoDatabase.pull();
+    return _lock.synchronized(() async {
+      _checkOpen();
+      if (!_isSync) {
+        return false;
+      }
+      return _tursoDatabase.pull();
+    });
   }
 
   @override
   Future<void> push() async {
-    _checkOpen();
-    if (!_isSync) {
-      return;
-    }
-    await _tursoDatabase.push();
+    await _lock.synchronized(() async {
+      _checkOpen();
+      if (!_isSync) {
+        return;
+      }
+      await _tursoDatabase.push();
+    });
   }
 
   @override
@@ -77,6 +81,27 @@ class TursoSqfliteDatabase extends TursoConnectionExecutor
 
   @override
   Future<T> transaction<T>(
+    Future<T> Function(Transaction txn) action, {
+    bool? exclusive,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await _runTransaction(action, exclusive: exclusive);
+      } catch (error) {
+        lastError = error;
+        if (!_isBusySnapshot(error) || attempt >= 2) {
+          rethrow;
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: 25 * (attempt + 1)),
+        );
+      }
+    }
+    throw lastError!;
+  }
+
+  Future<T> _runTransaction<T>(
     Future<T> Function(Transaction txn) action, {
     bool? exclusive,
   }) {
@@ -103,6 +128,12 @@ class TursoSqfliteDatabase extends TursoConnectionExecutor
         _inTransaction = false;
       }
     });
+  }
+
+  static bool _isBusySnapshot(Object error) {
+    final message = error.toString();
+    return message.contains('BusySnapshot') ||
+        message.contains('database snapshot is stale');
   }
 
   @override

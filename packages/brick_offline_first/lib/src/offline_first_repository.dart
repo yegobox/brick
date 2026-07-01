@@ -699,17 +699,13 @@ abstract class OfflineFirstRepository<
     List<TModel> models, {
     bool shouldNotify = true,
   }) async {
-    final modelIds =
-        models.map((m) => sqliteProvider.upsert<TModel>(m, repository: this));
-    final results = await Future.wait<int?>(modelIds, eagerError: true);
-
-    MapEntry modelWithPrimaryKey(index, id) {
-      final model = models[index]..primaryKey = id;
-      return MapEntry(index, model);
+    // Upsert sequentially — Turso embedded replicas reject concurrent
+    // transactions (BusySnapshot) when multiple upserts run in parallel.
+    final savedResults = <TModel>[];
+    for (final model in models) {
+      final id = await sqliteProvider.upsert<TModel>(model, repository: this);
+      savedResults.add(model..primaryKey = id);
     }
-
-    final savedResults =
-        results.asMap().map(modelWithPrimaryKey).values.toList().cast<TModel>();
     if (shouldNotify) {
       await notifySubscriptionsWithLocalData<TModel>();
     }
