@@ -1,6 +1,6 @@
 # Testing
 
-SQLite providers should use sqlite_ffi as described in [multiplatform support](sqlite.md#multiplatform-support):
+SQLite providers should use sqlite_ffi as described in [multiplatform support](sqlite.md#multiplatform-support). For Turso integration tests, see [Turso setup](turso.md#testing).
 
 ```dart
 import 'package:sqflite_common/sqlite_api.dart';

@@ -2,6 +2,8 @@ import 'package:brick_sqlite/src/db/migration_commands/drop_column.dart';
 import 'package:brick_sqlite/src/db/migration_commands/insert_column.dart';
 import 'package:brick_sqlite/src/db/migration_commands/migration_command.dart';
 import 'package:brick_sqlite/src/db/migration_commands/rename_column.dart';
+import 'package:brick_sqlite/src/turso/turso_migration_helper.dart';
+import 'package:brick_sqlite/turso.dart';
 import 'package:sqflite_common/sqlite_api.dart' show Database;
 
 /// Workaround for SQLite commands that require altering the table instead of the column.
@@ -152,24 +154,32 @@ class AlterColumnHelper {
     final newColumnNames = newColumns.map((c) => c['name']).join(', ');
     final selectExpression = isDrop ? newColumnNames : oldColumnNames;
 
+    final tempTableName = migrationTempTableName(tableName);
+
     await db.execute('PRAGMA foreign_keys = OFF');
-    await db.execute('PRAGMA legacy_alter_table = ON');
-    await db.transaction((txn) async {
-      // Rename existing table
-      await txn.execute('ALTER TABLE `$tableName` RENAME TO `temp_$tableName`');
-
-      // Setup new table
-      await txn.execute('CREATE TABLE `$tableName` ($newColumnsExpression)');
-
-      // Copy data
-      await txn.execute(
-        'INSERT INTO `$tableName`($newColumnNames) SELECT $selectExpression FROM `temp_$tableName`',
-      );
-
-      // Drop old table
-      await txn.execute('DROP TABLE `temp_$tableName`');
-    });
-    await db.execute('PRAGMA legacy_alter_table = OFF');
+    // Turso/libSQL does not support legacy_alter_table; table rebuild still works.
+    if (db is! TursoSqfliteDatabase) {
+      await db.execute('PRAGMA legacy_alter_table = ON');
+    }
+    try {
+      await db.transaction((txn) async {
+        await txn.execute(
+          'ALTER TABLE `$tableName` RENAME TO `$tempTableName`',
+        );
+        await txn.execute('CREATE TABLE `$tableName` ($newColumnsExpression)');
+        await txn.execute(
+          'INSERT INTO `$tableName`($newColumnNames) SELECT $selectExpression FROM `$tempTableName`',
+        );
+        await txn.execute('DROP TABLE `$tempTableName`');
+      });
+    } finally {
+      if (db is TursoSqfliteDatabase) {
+        await db.execute('DROP TABLE IF EXISTS "$tempTableName"');
+      }
+    }
+    if (db is! TursoSqfliteDatabase) {
+      await db.execute('PRAGMA legacy_alter_table = OFF');
+    }
     await db.execute('PRAGMA foreign_keys = ON');
   }
 }

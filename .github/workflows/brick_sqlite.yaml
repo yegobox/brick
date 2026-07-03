@@ -16,3 +16,10 @@ jobs:
     uses: ./.github/workflows/reusable-dart-analyze-format-test.yaml
     with:
       package: brick_sqlite
+
+  turso_tests:
+    uses: ./.github/workflows/reusable-dart-analyze-format-test.yaml
+    with:
+      package: brick_sqlite
+      requires_rust: true
+      test_command: dart test test/turso

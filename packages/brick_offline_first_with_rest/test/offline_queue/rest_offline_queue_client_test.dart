@@ -58,6 +58,17 @@ void main() {
         expect(resp.statusCode, 200);
       });
 
+      test('409 Conflict removes queued row when not configured for reattempt', () async {
+        const body = 'duplicate key';
+        final inner = stubResult(response: body, statusCode: 409);
+        final client = RestOfflineQueueClient(inner, requestManager);
+        final resp = await client.post(Uri.parse('http://0.0.0.0:3000'), body: 'conflict record');
+
+        expect(resp.statusCode, 409);
+        expect(resp.body, body);
+        expect(await requestManager.unprocessedRequests(), isEmpty);
+      });
+
       test('request increments after a unsuccessful response', () async {
         final inner = stubResult(statusCode: 501);
         final client = RestOfflineQueueClient(inner, requestManager);

@@ -41,6 +41,22 @@ Brick SQLite can be used when developing for Windows, MacOS, and Linux platforms
     }
     ```
 
+## Turso Backend (optional)
+
+Brick also supports [Turso](https://docs.turso.tech/connect/dart) via a sqflite-compatible adapter. Inject `tursoDatabaseFactory()` or `tursoSyncDatabaseFactory(...)` instead of `databaseFactoryFfi` / mobile `databaseFactory`:
+
+```dart
+import 'package:brick_sqlite/turso.dart';
+
+SqliteProvider(
+  databasePath,
+  databaseFactory: tursoDatabaseFactory(),
+  modelDictionary: modelDictionary,
+);
+```
+
+See [Turso setup](sqlite/turso.md) for embedded replica sync and testing helpers.
+
 ## FAQ
 
 ### Can I specify a different table name?

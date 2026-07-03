@@ -12,11 +12,15 @@ Delete local results before waiting for the remote provider to respond.
 
 Delete local results after remote responds; local results are not deleted if remote responds with any exception.
 
+### `localOnly`
+
+Delete local results only; do not send any request to the remote provider.
+
 ## OfflineFirstGetPolicy
 
 ### `alwaysHydrate`
 
-Ensures data is fetched from the remote provider(s) at each invocation. This hydration is unawaited and is not guaranteed to complete before results are returned. This can be expensive to perform for some queries; see [`awaitRemoteWhenNoneExist`](#awaitremotewhennoneexist) for a more performant option or [`awaitRemote`](#awaitremote) to await the hydration before returning results.
+Returns local results immediately, then refreshes in the background: **Turso cloud pull** (embedded replica) followed by **remote provider hydration**. The refresh is unawaited. See [Turso get policies](../sqlite/turso_get_policies.md).
 
 ### `awaitRemote`
 
@@ -24,7 +28,7 @@ Ensures results must be updated from the remote proivder(s) before returning if 
 
 ### `awaitRemoteWhenNoneExist` (default)
 
-Retrieves from the remote provider(s) if the query returns no results from the local provider(s).
+Retrieves from the remote provider(s) if the query returns no results from the local provider(s). When using Turso, a **cloud pull** is attempted first, then Supabase hydrate if still empty. See [Turso get policies](../sqlite/turso_get_policies.md).
 
 ### `localOnly`
 
@@ -39,3 +43,7 @@ Save results to local before waiting for the remote provider to respond.
 ### `requireRemote`
 
 Save results to local after remote responds; local results are not saved if remote responds with any exception.
+
+### `localOnly`
+
+Save results to local only; do not send any request to the remote provider.
