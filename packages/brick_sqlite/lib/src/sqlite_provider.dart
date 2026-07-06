@@ -248,7 +248,6 @@ class SqliteProvider<TProviderModel extends SqliteModel>
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         [tableName],
       );
-
       final exists = result.isNotEmpty;
       if (exists && cache != null) {
         cache.add(tableName);
