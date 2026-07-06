@@ -2,8 +2,8 @@ import 'package:brick_sqlite/src/db/migration_commands/drop_column.dart';
 import 'package:brick_sqlite/src/db/migration_commands/insert_column.dart';
 import 'package:brick_sqlite/src/db/migration_commands/migration_command.dart';
 import 'package:brick_sqlite/src/db/migration_commands/rename_column.dart';
-import 'package:brick_sqlite/turso.dart';
 import 'package:brick_sqlite/src/turso/turso_migration_helper.dart';
+import 'package:brick_sqlite/turso.dart';
 import 'package:sqflite_common/sqlite_api.dart' show Database;
 
 /// Workaround for SQLite commands that require altering the table instead of the column.
