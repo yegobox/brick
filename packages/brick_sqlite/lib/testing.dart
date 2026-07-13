@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:brick_sqlite/turso.dart';
-import 'package:sqflite_common/sqlite_api.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// Supported local database backends for Brick integration tests.

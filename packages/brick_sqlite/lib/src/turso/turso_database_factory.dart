@@ -233,7 +233,7 @@ class TursoDatabaseFactory implements DatabaseFactory {
     if (syncConfig != null && path == syncConfig!.localPath) {
       return syncConfig!.localPath;
     }
-    if (path.startsWith('/') || path.contains(':\\')) {
+    if (path.startsWith('/') || path.contains(r':\')) {
       return path;
     }
     return '$databasesPath/$path';

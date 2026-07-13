@@ -112,7 +112,7 @@ class TursoSqfliteDatabase extends TursoConnectionExecutor
       }
       _inTransaction = true;
       final tursoTxn = await connection.transaction(
-        behavior: exclusive == true
+        behavior: exclusive ?? false
             ? TransactionBehavior.exclusive
             : TransactionBehavior.deferred,
       );

@@ -1,3 +1,4 @@
+import 'package:brick_sqlite/src/helpers/alter_column_helper.dart' show AlterColumnHelper;
 import 'package:brick_sqlite/src/turso/turso_database.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
@@ -20,7 +21,7 @@ Future<void> cleanupOrphanedMigrationTempTables(Database db) async {
   );
 
   for (final row in tables) {
-    final name = row['name'] as String;
+    final name = row['name']! as String;
     await db.execute('DROP TABLE IF EXISTS "$name"');
   }
 }

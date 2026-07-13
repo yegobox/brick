@@ -219,7 +219,7 @@ class SqliteProvider<TProviderModel extends SqliteModel>
 
       // Check if column exists in the table
       final columns = await db.rawQuery('PRAGMA table_info("$tableName")');
-      final columnNames = columns.map((col) => col['name'] as String).toSet();
+      final columnNames = columns.map((col) => col['name']! as String).toSet();
 
       // Update cache if provided
       if (tableColumnsCache != null) {

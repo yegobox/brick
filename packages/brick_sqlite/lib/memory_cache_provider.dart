@@ -124,7 +124,7 @@ class MemoryCacheProvider<TProviderModel extends SqliteModel>
     }
 
     hydrate<TModel>([instance]);
-    return managedObjects[TModel]![primaryKey] as TModel;
+    return managedObjects[TModel]![primaryKey]! as TModel;
   }
 }
 

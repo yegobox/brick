@@ -150,7 +150,7 @@ void main() {
           "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
         );
         final tableNames =
-            tables.map((t) => (t['name'] as String).toLowerCase()).toList();
+            tables.map((t) => (t['name']! as String).toLowerCase()).toList();
         expect(tableNames, contains('demomodelassoc'));
         expect(tableNames, contains('demomodel'));
       });
