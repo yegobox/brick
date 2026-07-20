@@ -85,16 +85,40 @@ class TursoSqfliteDatabase extends TursoConnectionExecutor
     bool? exclusive,
   }) async {
     Object? lastError;
-    for (var attempt = 0; attempt < 3; attempt++) {
+    const maxAttempts = 5;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         return await _runTransaction(action, exclusive: exclusive);
       } catch (error) {
         lastError = error;
-        if (!_isBusySnapshot(error) || attempt >= 2) {
+        if (!_isRetryableSnapshotError(error) || attempt >= maxAttempts - 1) {
           rethrow;
         }
+        // On an embedded replica, a write made moments ago on this same
+        // connection may not yet be visible to a *new* transaction's local
+        // read until the replica has pulled the latest frames — which can
+        // surface as a stale-snapshot error or, when the not-yet-visible row
+        // is referenced by a foreign key, as a constraint failure. Pulling
+        // before the retry (instead of only waiting) directly closes that
+        // gap rather than hoping the delay alone was long enough.
+        if (_isSync) {
+          try {
+            await _tursoDatabase.pull();
+          } catch (_) {
+            // Ignore pull failures here; the retry below still applies and
+            // will surface `lastError` if attempts are exhausted.
+          }
+        } else {
+          // Non-sync local Turso: force the connection past the stale
+          // snapshot with a cheap read before retrying the write.
+          try {
+            await connection.query('SELECT 1');
+          } catch (_) {
+            // Best-effort refresh; retry still proceeds.
+          }
+        }
         await Future<void>.delayed(
-          Duration(milliseconds: 25 * (attempt + 1)),
+          Duration(milliseconds: 100 * (1 << attempt)),
         );
       }
     }
@@ -130,10 +154,17 @@ class TursoSqfliteDatabase extends TursoConnectionExecutor
     });
   }
 
-  static bool _isBusySnapshot(Object error) {
+  /// True for transient embedded-replica staleness: the transaction reads
+  /// against a local snapshot that hasn't yet observed a just-committed
+  /// write from a prior transaction. Turso/libSQL surfaces this either as an
+  /// explicit stale-snapshot error, or — when the not-yet-visible row is
+  /// referenced by a foreign key from the row being written — as a FOREIGN
+  /// KEY constraint failure. Both are safe to retry against a fresh snapshot.
+  static bool _isRetryableSnapshotError(Object error) {
     final message = error.toString();
     return message.contains('BusySnapshot') ||
-        message.contains('database snapshot is stale');
+        message.contains('database snapshot is stale') ||
+        message.contains('FOREIGN KEY constraint failed');
   }
 
   @override

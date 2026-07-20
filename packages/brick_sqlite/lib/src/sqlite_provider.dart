@@ -463,40 +463,91 @@ class SqliteProvider<TProviderModel extends SqliteModel>
     final adapter = modelDictionary.adapterFor[TModel]!;
     final db = await getDb();
 
-    await adapter.beforeSave(instance, provider: this, repository: repository);
-    await instance.beforeSave(provider: this, repository: repository);
-    final data = await adapter.toSqlite(
-      instance,
-      provider: this,
-      repository: repository,
-    );
-
-    final id = await _lock.synchronized(
-      () async => await db.transaction<int?>((txn) async {
-        final existingPrimaryKey =
-            await adapter.primaryKeyByUniqueColumns(instance, txn);
-
-        if (instance.isNewRecord && existingPrimaryKey == null) {
-          return await txn.insert(
-            '`${adapter.tableName}`',
-            data,
-          );
-        }
-
-        final primaryKey = existingPrimaryKey ?? instance.primaryKey;
-        await txn.update(
-          '`${adapter.tableName}`',
-          data,
-          where: '${InsertTable.PRIMARY_KEY_COLUMN} = ?',
-          whereArgs: [primaryKey],
+    // Association fields (e.g. Variant.stock) are upserted inside [toSqlite]
+    // in a *separate* transaction from the parent insert. On Turso embedded
+    // replicas that can surface as FOREIGN KEY failures when the association
+    // row is not yet visible, or when a stale association primaryKey points
+    // at a missing row. Retry the full upsert (including toSqlite) and clear
+    // association primaryKeys so the next attempt re-writes the parent row.
+    Object? lastError;
+    const maxAttempts = 5;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        await adapter.beforeSave(
+          instance,
+          provider: this,
+          repository: repository,
         );
-        return primaryKey;
-      }),
-    );
+        await instance.beforeSave(provider: this, repository: repository);
+        final data = await adapter.toSqlite(
+          instance,
+          provider: this,
+          repository: repository,
+        );
 
-    instance.primaryKey = id;
-    await adapter.afterSave(instance, provider: this, repository: repository);
-    await instance.afterSave(provider: this, repository: repository);
-    return id;
+        final id = await _lock.synchronized(
+          () async => await db.transaction<int?>((txn) async {
+            final existingPrimaryKey =
+                await adapter.primaryKeyByUniqueColumns(instance, txn);
+
+            if (instance.isNewRecord && existingPrimaryKey == null) {
+              return await txn.insert(
+                '`${adapter.tableName}`',
+                data,
+              );
+            }
+
+            final primaryKey = existingPrimaryKey ?? instance.primaryKey;
+            await txn.update(
+              '`${adapter.tableName}`',
+              data,
+              where: '${InsertTable.PRIMARY_KEY_COLUMN} = ?',
+              whereArgs: [primaryKey],
+            );
+            return primaryKey;
+          }),
+        );
+
+        instance.primaryKey = id;
+        await adapter.afterSave(
+          instance,
+          provider: this,
+          repository: repository,
+        );
+        await instance.afterSave(provider: this, repository: repository);
+        return id;
+      } catch (error) {
+        lastError = error;
+        if (!_isRetryableAssociationFkError(error) ||
+            attempt >= maxAttempts - 1) {
+          rethrow;
+        }
+        _clearAssociationPrimaryKeys(instance);
+        await Future<void>.delayed(
+          Duration(milliseconds: 50 * (1 << attempt)),
+        );
+      }
+    }
+    throw lastError!;
+  }
+
+  /// Turso / libSQL can report a just-committed association as missing via FK.
+  static bool _isRetryableAssociationFkError(Object error) {
+    final message = error.toString();
+    return message.contains('FOREIGN KEY constraint failed') ||
+        message.contains('BusySnapshot') ||
+        message.contains('database snapshot is stale');
+  }
+
+  /// Drop cached association brick ids so [toSqlite] re-upserts them.
+  static void _clearAssociationPrimaryKeys(Object instance) {
+    try {
+      final stock = (instance as dynamic).stock;
+      if (stock is SqliteModel) {
+        stock.primaryKey = null;
+      }
+    } catch (_) {
+      // Instance has no stock association — nothing to clear.
+    }
   }
 }
