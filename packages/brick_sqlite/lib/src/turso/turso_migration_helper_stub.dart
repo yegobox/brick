@@ -4,3 +4,5 @@ String migrationTempTableName(String tableName) =>
     'temp_${tableName.toLowerCase()}';
 
 Future<void> cleanupOrphanedMigrationTempTables(Database db) async {}
+
+Future<void> repairDanglingTempMigrationIndexes(Database db) async {}

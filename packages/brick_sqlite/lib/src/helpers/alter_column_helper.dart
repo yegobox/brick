@@ -109,8 +109,59 @@ class AlterColumnHelper {
         return definition.join(' ');
       }).join(', ');
 
+  /// Prefer native ALTER when possible — Turso table rebuilds via temp rename
+  /// have corrupted replicas (duplicate case-folded tables + indexes on
+  /// dropped `temp_*` tables).
+  Future<bool> _tryNativeAlter(Database db) async {
+    if (isRename) {
+      final rename = command as RenameColumn;
+      final columns = await tableInfo(db);
+      final hasOld = columns.any((c) => c['name'] == rename.oldName);
+      final hasNew = columns.any((c) => c['name'] == rename.newName);
+      if (!hasOld && hasNew) {
+        // Already applied (re-run / partial prior migrate).
+        return true;
+      }
+      if (!hasOld) {
+        return false;
+      }
+      if (hasNew) {
+        // Both names present — unsafe to rename; fall back to rebuild.
+        return false;
+      }
+      await db.execute(
+        'ALTER TABLE `${rename.onTable}` RENAME COLUMN `${rename.oldName}` '
+        'TO `${rename.newName}`',
+      );
+      return true;
+    }
+
+    if (isDrop) {
+      final drop = command as DropColumn;
+      final columns = await tableInfo(db);
+      if (!columns.any((c) => c['name'] == drop.name)) {
+        return true;
+      }
+      try {
+        await db.execute(
+          'ALTER TABLE `${drop.onTable}` DROP COLUMN `${drop.name}`',
+        );
+        return true;
+      } catch (_) {
+        // Older SQLite / unsupported — rebuild below.
+        return false;
+      }
+    }
+
+    return false;
+  }
+
   /// Perform the necessary SQLite operation
   Future<void> execute(Database db) async {
+    if (await _tryNativeAlter(db)) {
+      return;
+    }
+
     // For unique insert columns, check if column already exists before attempting to add it
     if (isUniqueInsert && command.statement != null) {
       final columns = await tableInfo(db);

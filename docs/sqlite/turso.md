@@ -88,6 +88,7 @@ Turso integration tests live in `packages/brick_sqlite/test/turso/`.
 - Turso treats `ALTER TABLE ... ADD col VARCHAR NULL` as `NOT NULL`. Brick adapts generated migration SQL automatically when using the Turso database factory.
 - `PRAGMA legacy_alter_table` is unsupported; Brick skips it on Turso and uses the table-rebuild migration path without that pragma.
 - Migration table rebuilds use lowercase `temp_<table>` names; orphaned `temp_*` tables are dropped before Turso sync push.
+- **Prefer native DDL:** [RenameColumn] uses `ALTER TABLE … RENAME COLUMN` and [DropColumn] tries `ALTER TABLE … DROP COLUMN` before any temp-table rebuild. Rebuilds on Turso have caused corrupt replicas (`temp_*` indexes, duplicate case-folded table names).
 
 ## Further reading
 
