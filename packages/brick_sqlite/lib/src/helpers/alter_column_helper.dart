@@ -129,11 +129,17 @@ class AlterColumnHelper {
         // Both names present — unsafe to rename; fall back to rebuild.
         return false;
       }
-      await db.execute(
-        'ALTER TABLE `${rename.onTable}` RENAME COLUMN `${rename.oldName}` '
-        'TO `${rename.newName}`',
-      );
-      return true;
+      try {
+        await db.execute(
+          'ALTER TABLE `${rename.onTable}` RENAME COLUMN `${rename.oldName}` '
+          'TO `${rename.newName}`',
+        );
+        return true;
+      } catch (_) {
+        // RENAME COLUMN needs SQLite 3.25; Android 8–10 system SQLite is
+        // older — rebuild below.
+        return false;
+      }
     }
 
     if (isDrop) {
