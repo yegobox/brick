@@ -49,7 +49,7 @@ abstract class FieldsForClass<FieldAnnotation extends Object> {
 
   /// Returns `true` for `int get name => 5`
   /// In later analyzer releases, `ImplicitGetter` was removed
-  static bool isComputedGetter(FieldElement field) => !field.getter!.isSynthetic;
+  static bool isComputedGetter(FieldElement field) => field.getter!.isOriginDeclaration;
 }
 
 /// Ensures uniqueness of accessible fields within a [ClassElement]
@@ -97,7 +97,7 @@ class _FieldSet implements Comparable<_FieldSet> {
   /// Returns the offset of given field/property in its source file – with a
   /// preference for the getter if it's defined.
   static int _offsetFor(FieldElement e) {
-    if (e.isSynthetic) {
+    if (!e.isOriginDeclaration) {
       return (e.getter ?? e.setter)!.id;
     }
     return e.id;
