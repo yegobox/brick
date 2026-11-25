@@ -1,4 +1,5 @@
 import 'package:brick_offline_first/src/offline_queue/request_sqlite_cache.dart';
+import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 import 'package:sqflite_common/sqlite_api.dart' show Database, DatabaseExecutor, DatabaseFactory;
 
@@ -29,6 +30,8 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
   final String updateAtColumn;
 
   Future<Database>? _db;
+
+  final _logger = Logger('RequestSqliteCacheManager');
 
   ///
   final String tableName;
@@ -79,9 +82,17 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
     return result > 0;
   }
 
-  ///
-  Future<Database> getDb() {
-    _db ??= databaseFactory.openDatabase(databaseName);
+  /// Access the queue database. When the cached connection was closed
+  /// (for example, by another owner of the same path), it is reopened.
+  Future<Database> getDb() async {
+    final pending = _db ??= databaseFactory.openDatabase(databaseName);
+    final db = await pending;
+    if (db.isOpen) return db;
+
+    if (identical(_db, pending)) {
+      _logger.warning('Queue database $databaseName was closed; reopening');
+      _db = databaseFactory.openDatabase(databaseName);
+    }
 
     return _db!;
   }

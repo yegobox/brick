@@ -38,15 +38,19 @@ abstract class OfflineRequestQueue<TRequest> {
 
     _processingInBackground = true;
 
-    TRequest? request;
     try {
-      request = await requestManager.prepareNextRequestToProcess();
-    } finally {
-      _processingInBackground = false;
-    }
+      TRequest? request;
+      try {
+        request = await requestManager.prepareNextRequestToProcess();
+      } finally {
+        _processingInBackground = false;
+      }
 
-    if (request != null) {
-      await transmitRequest(request);
+      if (request != null) {
+        await transmitRequest(request);
+      }
+    } catch (e, stackTrace) {
+      logger.warning('#_process failure: $e', e, stackTrace);
     }
   }
 
