@@ -85,16 +85,27 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
   /// Access the queue database. When the cached connection was closed
   /// (for example, by another owner of the same path), it is reopened.
   Future<Database> getDb() async {
-    final pending = _db ??= databaseFactory.openDatabase(databaseName);
+    final pending = _db ??= _open();
     final db = await pending;
     if (db.isOpen) return db;
 
     if (identical(_db, pending)) {
       _logger.warning('Queue database $databaseName was closed; reopening');
-      _db = databaseFactory.openDatabase(databaseName);
+      _db = _open();
     }
 
     return _db!;
+  }
+
+  /// Open [databaseName]. A failed open is not cached, so the next
+  /// [getDb] call tries again instead of failing until restart.
+  Future<Database> _open() {
+    late final Future<Database> opening;
+    opening = databaseFactory.openDatabase(databaseName).catchError((Object e, StackTrace st) {
+      if (identical(_db, opening)) _db = null;
+      Error.throwWithStackTrace(e, st);
+    });
+    return opening;
   }
 
   /// Prepare schema.

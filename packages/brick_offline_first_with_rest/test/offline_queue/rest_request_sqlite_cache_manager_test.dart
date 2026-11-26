@@ -89,6 +89,22 @@ void main() {
       await db.close();
     });
 
+    test('#getDb retries after a failed open', () async {
+      final dir = await Directory.systemTemp.createTemp('brick_queue_');
+      addTearDown(() => dir.delete(recursive: true));
+      final manager = RestRequestSqliteCacheManager(
+        p.join(dir.path, 'queue.sqlite'),
+        databaseFactory: _FailOnceDatabaseFactory(),
+        processingInterval: Duration.zero,
+      );
+
+      await expectLater(manager.getDb(), throwsStateError);
+
+      final db = await manager.getDb();
+      expect(db.isOpen, isTrue);
+      await db.close();
+    });
+
     group('#prepareNextRequestToProcess', () {
       test('integration', () async {
         final inner = stubResult(statusCode: 501);
@@ -174,4 +190,21 @@ void main() {
       });
     });
   });
+}
+
+/// Fails the first open, then delegates to the FFI factory.
+class _FailOnceDatabaseFactory implements DatabaseFactory {
+  var _failed = false;
+
+  @override
+  Future<Database> openDatabase(String path, {OpenDatabaseOptions? options}) {
+    if (!_failed) {
+      _failed = true;
+      return Future.error(StateError('open failed'));
+    }
+    return databaseFactoryFfi.openDatabase(path, options: options);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
