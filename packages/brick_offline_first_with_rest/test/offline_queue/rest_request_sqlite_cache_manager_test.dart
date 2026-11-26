@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:brick_offline_first_with_rest/src/offline_queue/rest_offline_queue_client.dart';
 import 'package:brick_offline_first_with_rest/src/offline_queue/rest_request_sqlite_cache.dart';
 import 'package:brick_offline_first_with_rest/src/offline_queue/rest_request_sqlite_cache_manager.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:test/test.dart';
 
@@ -64,6 +67,42 @@ void main() {
       await requestManager
           .deleteUnprocessedRequest(unprocessedRequests[0][HTTP_JOBS_PRIMARY_KEY_COLUMN]);
       expect(await requestManager.unprocessedRequests(), isEmpty);
+    });
+
+    test('#getDb reopens a closed database', () async {
+      final dir = await Directory.systemTemp.createTemp('brick_queue_');
+      addTearDown(() => dir.delete(recursive: true));
+      final fileManager = RestRequestSqliteCacheManager(
+        p.join(dir.path, 'queue.sqlite'),
+        databaseFactory: databaseFactoryFfi,
+        processingInterval: Duration.zero,
+      );
+      await fileManager.migrate();
+      final client = RestOfflineQueueClient(stubResult(statusCode: 501), fileManager);
+      await client.put(Uri.parse('http://0.0.0.0:3000'), body: 'existing record');
+
+      await (await fileManager.getDb()).close();
+
+      final db = await fileManager.getDb();
+      expect(db.isOpen, isTrue);
+      expect(await fileManager.unprocessedRequests(), hasLength(1));
+      await db.close();
+    });
+
+    test('#getDb retries after a failed open', () async {
+      final dir = await Directory.systemTemp.createTemp('brick_queue_');
+      addTearDown(() => dir.delete(recursive: true));
+      final manager = RestRequestSqliteCacheManager(
+        p.join(dir.path, 'queue.sqlite'),
+        databaseFactory: _FailOnceDatabaseFactory(),
+        processingInterval: Duration.zero,
+      );
+
+      await expectLater(manager.getDb(), throwsStateError);
+
+      final db = await manager.getDb();
+      expect(db.isOpen, isTrue);
+      await db.close();
     });
 
     group('#prepareNextRequestToProcess', () {
@@ -151,4 +190,21 @@ void main() {
       });
     });
   });
+}
+
+/// Fails the first open, then delegates to the FFI factory.
+class _FailOnceDatabaseFactory implements DatabaseFactory {
+  var _failed = false;
+
+  @override
+  Future<Database> openDatabase(String path, {OpenDatabaseOptions? options}) {
+    if (!_failed) {
+      _failed = true;
+      return Future.error(StateError('open failed'));
+    }
+    return databaseFactoryFfi.openDatabase(path, options: options);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:brick_offline_first/src/offline_queue/request_sqlite_cache.dart';
+import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 import 'package:sqflite_common/sqlite_api.dart' show Database, DatabaseExecutor, DatabaseFactory;
 
@@ -29,6 +32,18 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
   final String updateAtColumn;
 
   Future<Database>? _db;
+
+  /// Set when a closed connection is dropped; cleared only after [migrate]
+  /// succeeds on a new one. See [getDb].
+  bool _needsMigrate = false;
+
+  /// The running [migrate] of a reopened connection, shared by concurrent callers.
+  Future<void>? _migrating;
+
+  /// Marks [migrate]'s own [getDb] calls so they do not wait on [_migrating].
+  static final _migrateZoneKey = Object();
+
+  final _logger = Logger('RequestSqliteCacheManager');
 
   ///
   final String tableName;
@@ -79,11 +94,58 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
     return result > 0;
   }
 
-  ///
-  Future<Database> getDb() {
-    _db ??= databaseFactory.openDatabase(databaseName);
+  /// Access the queue database. When the cached connection was closed
+  /// (for example, by another owner of the same path), it is reopened and
+  /// [migrate] runs again, since an in-memory or deleted queue comes back empty.
+  /// Callers wait for that migration; [migrate]'s own call does not. If the
+  /// reopen or the migration fails, the next call tries again.
+  Future<Database> getDb() async {
+    final pending = _db ??= _open();
+    final db = await pending;
+    if (!db.isOpen) {
+      if (identical(_db, pending)) {
+        _logger.warning('Queue database $databaseName was closed; reopening');
+        _db = null;
+        _needsMigrate = true;
+      }
+      return getDb();
+    }
 
-    return _db!;
+    if (_needsMigrate && Zone.current[_migrateZoneKey] == null) {
+      await (_migrating ??= _migrateReopened());
+    }
+
+    return db;
+  }
+
+  /// Open [databaseName]. A failed open is not cached, so the next
+  /// [getDb] call tries again instead of failing until restart.
+  Future<Database> _open() {
+    late final Future<Database> opening;
+    // The handler refers to `opening`, so it cannot be inlined into the return.
+    // ignore: join_return_with_assignment
+    opening = databaseFactory.openDatabase(databaseName).catchError((Object e, StackTrace st) {
+      if (identical(_db, opening)) _db = null;
+      Error.throwWithStackTrace(e, st);
+    });
+    return opening;
+  }
+
+  /// Recreate the schema on a reopened connection. Never throws, so callers
+  /// waiting in [getDb] continue; after a failure the next [getDb] retries.
+  Future<void> _migrateReopened() async {
+    try {
+      await runZoned(migrate, zoneValues: {_migrateZoneKey: true});
+      _needsMigrate = false;
+    } catch (e, stackTrace) {
+      _logger.warning(
+        'Queue database $databaseName could not be migrated after reopening: $e',
+        e,
+        stackTrace,
+      );
+    } finally {
+      _migrating = null;
+    }
   }
 
   /// Prepare schema.
