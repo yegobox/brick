@@ -33,11 +33,15 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
 
   Future<Database>? _db;
 
-  /// Pending [migrate] of a reopened connection; see [getDb].
-  Future<void>? _reopening;
+  /// Set when a closed connection is dropped; cleared only after [migrate]
+  /// succeeds on a new one. See [getDb].
+  bool _needsMigrate = false;
 
-  /// Marks [migrate]'s own [getDb] calls so they do not wait on [_reopening].
-  static final _reopenZoneKey = Object();
+  /// The running [migrate] of a reopened connection, shared by concurrent callers.
+  Future<void>? _migrating;
+
+  /// Marks [migrate]'s own [getDb] calls so they do not wait on [_migrating].
+  static final _migrateZoneKey = Object();
 
   final _logger = Logger('RequestSqliteCacheManager');
 
@@ -93,25 +97,25 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
   /// Access the queue database. When the cached connection was closed
   /// (for example, by another owner of the same path), it is reopened and
   /// [migrate] runs again, since an in-memory or deleted queue comes back empty.
-  /// Callers wait for that migration; [migrate]'s own call does not.
+  /// Callers wait for that migration; [migrate]'s own call does not. If the
+  /// reopen or the migration fails, the next call tries again.
   Future<Database> getDb() async {
-    final reopening = _reopening;
-    if (reopening != null && Zone.current[_reopenZoneKey] == null) {
-      await reopening;
-      if (identical(_reopening, reopening)) _reopening = null;
-    }
-
     final pending = _db ??= _open();
     final db = await pending;
-    if (db.isOpen) return db;
-
-    if (identical(_db, pending)) {
-      _logger.warning('Queue database $databaseName was closed; reopening');
-      _db = _open();
-      _reopening = _migrateReopened();
+    if (!db.isOpen) {
+      if (identical(_db, pending)) {
+        _logger.warning('Queue database $databaseName was closed; reopening');
+        _db = null;
+        _needsMigrate = true;
+      }
+      return getDb();
     }
 
-    return getDb();
+    if (_needsMigrate && Zone.current[_migrateZoneKey] == null) {
+      await (_migrating ??= _migrateReopened());
+    }
+
+    return db;
   }
 
   /// Open [databaseName]. A failed open is not cached, so the next
@@ -128,16 +132,19 @@ abstract class RequestSqliteCacheManager<RequestMethod> {
   }
 
   /// Recreate the schema on a reopened connection. Never throws, so callers
-  /// waiting in [getDb] continue; a failure surfaces on their next query.
+  /// waiting in [getDb] continue; after a failure the next [getDb] retries.
   Future<void> _migrateReopened() async {
     try {
-      await runZoned(migrate, zoneValues: {_reopenZoneKey: true});
+      await runZoned(migrate, zoneValues: {_migrateZoneKey: true});
+      _needsMigrate = false;
     } catch (e, stackTrace) {
       _logger.warning(
         'Queue database $databaseName could not be migrated after reopening: $e',
         e,
         stackTrace,
       );
+    } finally {
+      _migrating = null;
     }
   }
 
